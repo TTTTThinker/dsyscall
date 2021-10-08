@@ -9,8 +9,8 @@
 #include <sys/syscall.h>
 
 #define MAXTHREADS 128
-#define DURATION 1
-static int nthreads;
+#define DURATION 10
+static int ncpus;
 
 pthread_t threads[MAXTHREADS];
 void *thread_ret[MAXTHREADS];
@@ -43,7 +43,7 @@ void *mmap_routine(void *args)
 // For the main thread
 void alrm_handler(int sig)
 {
-    for (int i = 0; i < nthreads; ++i)
+    for (int i = 0; i < ncpus; ++i)
         pthread_kill(threads[i], SIGCHLD);
 }
 
@@ -58,7 +58,7 @@ void chld_handler(int sig)
 
 int main(int argc, char **argv)
 {
-    nthreads = sysconf(_SC_NPROCESSORS_ONLN);
+    ncpus = sysconf(_SC_NPROCESSORS_ONLN);
 
     // Set the signal handler for SIGALRM && SIGCHLD
     struct sigaction alrm, chld;
@@ -70,16 +70,16 @@ int main(int argc, char **argv)
     sigaction(SIGCHLD, &chld, NULL);
 
     pthread_key_create(&tls_key, NULL);
-    for (int i = 0; i < nthreads; ++i)
+    for (int i = 0; i < ncpus; ++i)
         pthread_create(&threads[i], NULL, mmap_routine, NULL);
     
     alarm(DURATION);
 
-    for (int i = 0; i < nthreads; ++i)
+    for (int i = 0; i < ncpus; ++i)
         pthread_join(threads[i], &thread_ret[i]);
     
     pthread_key_delete(tls_key);
-    printf("==> Threads: %d, Thoughput: %lu (ops)\n", nthreads, thrput.times / DURATION);
+    printf("==> CPUs: %d, Thoughput: %lu (ops per CPU)\n", ncpus, (thrput.times / DURATION / (ncpus - 1)));
 
     return 0;
 }

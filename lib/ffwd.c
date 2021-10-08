@@ -5,10 +5,16 @@
 #include <sched.h>
 #include <unistd.h>
 #include <signal.h>
+#include <pthread.h>
 #include <sys/types.h>
 #include <sys/syscall.h>
 
 #include "ffwd.h"
+
+static void clean_up_handler(void)
+{
+    printf("[coreID: %04d || threadID: %ld] ===> Server routine exiting ...\n", sched_getcpu(), syscall(SYS_gettid));
+}
 
 void *server_routine(void *args)
 {
@@ -17,7 +23,12 @@ void *server_routine(void *args)
     
     int cpuid = sched_getcpu();
     long threadid = syscall(SYS_gettid);
-    printf("[coreID: %04x || threadID: %ld] ===> Server routine start serving ...\n", cpuid, threadid);
+    printf("[coreID: %04d || threadID: %ld] ===> Server routine start serving ...\n", cpuid, threadid);
+
+    int cancelstate, canceltype;
+    pthread_cleanup_push(clean_up_handler, NULL);
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &cancelstate);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &canceltype);
 
     while(1) {
         re.flags = responses.flags;
@@ -59,9 +70,10 @@ void *server_routine(void *args)
             modified = 0;
         }
 #ifdef DEBUG
-    printf("[coreID: %04x || threadID: %ld] ===> A round finished.\n", cpuid, threadid);
+    printf("[coreID: %4d || threadID: %ld] ===> A round finished.\n", cpuid, threadid);
 #endif
     }
+    pthread_cleanup_pop(clean_up_handler);
 }
 
 long dsyscall(long syscallno, int argc, ...)
@@ -85,11 +97,11 @@ long dsyscall(long syscallno, int argc, ...)
     requests[cpuid] = req;
     // Maybe context switch between REQ & RESP, so there is a bug
 #ifdef DEBUG
-    printf("[coreID: %04x || threadID: %ld] ===> In dsyscall(): REQ sent.\n", cpuid, syscall(SYS_gettid));
+    printf("[coreID: %04d || threadID: %ld] ===> In dsyscall(): REQ sent.\n", cpuid, syscall(SYS_gettid));
 #endif
     while (!((requests[cpuid].flags & FL_REQ) ^ RESP_GET(responses.flags, cpuid)));
 #ifdef DEBUG
-    printf("[coreID: %04x || threadID: %ld] ===> In dsyscall(): RESP received.\n", cpuid, syscall(SYS_gettid));
+    printf("[coreID: %04d || threadID: %ld] ===> In dsyscall(): RESP received.\n", cpuid, syscall(SYS_gettid));
 #endif
     ret = responses.ret[cpuid];
 

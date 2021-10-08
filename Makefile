@@ -6,8 +6,7 @@ LIBDIR	:= $(TOPDIR)/lib
 SRCDIR	:= $(TOPDIR)/src
 DSTDIR	:= $(TOPDIR)/dst
 
-CFLAGS	:= -O0 -g -std=gnu99 -I$(INCDIR)
-CFLAGS	+= -fno-stack-protector
+CFLAGS	:= -g -std=gnu99 -I$(INCDIR)
 LDFLAGS	:= -pthread -lgcc_s
 
 all: $(DSTDIR)/symmetriccore $(DSTDIR)/specificcore
