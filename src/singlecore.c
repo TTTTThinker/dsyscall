@@ -12,8 +12,6 @@
 #include <sys/types.h>
 #include <sys/syscall.h>
 
-#include "ffwd.h"
-
 static long ncpus;
 
 #define MAXTHREADS 32
@@ -38,11 +36,7 @@ static void alrm_handler(int sig)
 #ifdef DEBUG
     printf("SIGALRM handler called from thread: %lu\n", syscall(SYS_gettid));
 #endif
-    for (int i = 0; i < ncpus - 1; ++i) {
-        pthread_cancel(threads[i]);
-	// sleep(3);
-	// printf("Cancel thread num: %d\n", i);
-    }
+    pthread_cancel(threads[0]);
 }
 
 // For client thread
@@ -66,21 +60,14 @@ void *mmap_routine(void *args)
     pthread_cleanup_push(clean_up_handler, NULL);
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &cancelstate);
     pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &canceltype);
-/*
-    int cpuid = sched_getcpu();
-    int threadid = syscall(SYS_gettid);
-    cpu_set_t cpumask;
-    CPU_ZERO(&cpumask);
-    CPU_SET(cpuid, &cpumask);
-    sched_setaffinity(threadid, sizeof(cpu_set_t), &cpumask);
-*/
+
 #ifdef DEBUG
     printf("Enter client thread: %lu, core: %d\n", syscall(SYS_gettid), sched_getcpu());
 #endif
     
     while(1) {
-        addr = (void *)dsyscall(SYS_mmap, 6, NULL, 4096, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
-        dsyscall(SYS_munmap, 2, addr, 4096);
+        addr = (void *)syscall(SYS_mmap, NULL, 4096, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+        syscall(SYS_munmap, addr, 4096);
         local_times++;
         pthread_testcancel();
     }
@@ -90,9 +77,9 @@ void *mmap_routine(void *args)
 int main(int argc, char **argv)
 {
     ncpus = sysconf(_SC_NPROCESSORS_ONLN);
-    if((argc > 1) && (atoi(argv[1]) < ncpus))
+    if ((argc > 1) && (atoi(argv[1]) < ncpus))
 	ncpus = atoi(argv[1]);
- 
+    
     // Set the signal handler for SIGALRM
     struct sigaction alrm;
     alrm.sa_flags = 0;
@@ -100,39 +87,33 @@ int main(int argc, char **argv)
     sigaction(SIGALRM, &alrm, NULL);
     pthread_key_create(&tls_key, NULL);
 
-    pthread_t serverid;
-    void *serverret;
-
 #ifdef DEBUG
     int cpuid = sched_getcpu();
     long threadid = syscall(SYS_gettid);
     printf("[coreID: %4d || threadID: %ld] ===> Main thread\n", cpuid, threadid);
 #endif
 /*
-    int server_cpuid = (sched_getcpu() + 1) % ncpus;
-    pthread_attr_t server_attr;
-    cpu_set_t server_mask;
+    pthread_attr_t server_attr, client_attr;
+    cpu_set_t server_mask, client_mask;
     CPU_ZERO(&server_mask);
-    CPU_SET((server_cpuid + 1) % ncpus, &server_mask);
+    CPU_SET(cpuid, &server_mask);
+    sched_getaffinity(thread_id, sizeof(cpu_set_t), &client_mask);
+    CPU_CLR(cpuid, &client_mask);
 
-    const cpu_set_t server_cpus = server_mask;
+    const cpu_set_t server_cpus = server_mask, client_cpus = client_mask;
     pthread_attr_setaffinity_np(&server_attr, sizeof(cpu_set_t), &server_cpus);
+    pthread_attr_setaffinity_np(&client_attr, sizeof(cpu_set_t), &client_cpus);
+
     pthread_create(&serverid, &server_attr, server_routine, NULL);
-*/    
-    pthread_create(&serverid, NULL, server_routine, NULL);
-    for (int i = 0; i < ncpus - 1; ++i)
-        pthread_create(&threads[i], NULL, mmap_routine, NULL);
+*/
+    pthread_create(&threads[0], NULL, mmap_routine, NULL);
     
     alarm(DURATION);
 
-    for (int i = 0; i < ncpus - 1; ++i)
-        pthread_join(threads[i], &thread_ret[i]);
+    pthread_join(threads[0], &thread_ret[0]);
     
-    pthread_cancel(serverid);
-    pthread_join(serverid, &serverret);
-
     pthread_key_delete(tls_key);
-    printf("==> CPUs: %ld, Thoughput: %lu (ops per CPU)\n", ncpus, (thrput.times / DURATION / ncpus));
+    printf("==> CPUs: %ld, Thoughput: %lu (ops per CPU)\n", ncpus, (thrput.times / DURATION));
 
     return 0;
 }

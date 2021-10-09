@@ -59,6 +59,8 @@ void chld_handler(int sig)
 int main(int argc, char **argv)
 {
     ncpus = sysconf(_SC_NPROCESSORS_ONLN);
+    if ((argc > 1) && (atoi(argv[1]) < ncpus))
+	ncpus = atoi(argv[1]);
 
     // Set the signal handler for SIGALRM && SIGCHLD
     struct sigaction alrm, chld;
@@ -79,7 +81,7 @@ int main(int argc, char **argv)
         pthread_join(threads[i], &thread_ret[i]);
     
     pthread_key_delete(tls_key);
-    printf("==> CPUs: %d, Thoughput: %lu (ops per CPU)\n", ncpus, (thrput.times / DURATION / (ncpus - 1)));
+    printf("==> CPUs: %d, Thoughput: %lu (ops per CPU)\n", ncpus, (thrput.times / DURATION / ncpus));
 
     return 0;
 }

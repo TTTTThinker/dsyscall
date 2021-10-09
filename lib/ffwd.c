@@ -13,17 +13,22 @@
 
 static void clean_up_handler(void)
 {
-    printf("[coreID: %04d || threadID: %ld] ===> Server routine exiting ...\n", sched_getcpu(), syscall(SYS_gettid));
+    printf("[coreID: %4d || threadID: %ld] ===> Server routine exiting ...\n", sched_getcpu(), syscall(SYS_gettid));
 }
 
 void *server_routine(void *args)
 {
     int modified = 0;
-    struct response re;
-    
+    struct response re;    
     int cpuid = sched_getcpu();
     long threadid = syscall(SYS_gettid);
-    printf("[coreID: %04d || threadID: %ld] ===> Server routine start serving ...\n", cpuid, threadid);
+
+    cpu_set_t cpumask;
+    CPU_ZERO(&cpumask);
+    CPU_SET(cpuid, &cpumask);
+    sched_setaffinity(threadid, sizeof(cpu_set_t), &cpumask);
+
+    printf("[coreID: %4d || threadID: %ld] ===> Server routine start serving ...\n", cpuid, threadid);
 
     int cancelstate, canceltype;
     pthread_cleanup_push(clean_up_handler, NULL);
