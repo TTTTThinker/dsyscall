@@ -38,11 +38,8 @@ static void alrm_handler(int sig)
 #ifdef DEBUG
     printf("SIGALRM handler called from thread: %lu\n", syscall(SYS_gettid));
 #endif
-    for (int i = 0; i < ncpus - 1; ++i) {
+    for (int i = 0; i < ncpus - 2; ++i)
         pthread_cancel(threads[i]);
-	// sleep(3);
-	// printf("Cancel thread num: %d\n", i);
-    }
 }
 
 // For client thread
@@ -87,6 +84,35 @@ void *mmap_routine(void *args)
     pthread_cleanup_pop(clean_up_handler);
 }
 
+void *gettid_routine(void *args)
+{
+    unsigned long local_times;
+    int cancelstate, canceltype;
+    
+    pthread_setspecific(tls_key, &local_times);
+    pthread_cleanup_push(clean_up_handler, NULL);
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &cancelstate);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &canceltype);
+/*
+    int cpuid = sched_getcpu();
+    int threadid = syscall(SYS_gettid);
+    cpu_set_t cpumask;
+    CPU_ZERO(&cpumask);
+    CPU_SET(cpuid, &cpumask);
+    sched_setaffinity(threadid, sizeof(cpu_set_t), &cpumask);
+*/
+#ifdef DEBUG
+    printf("Enter client thread: %lu, core: %d\n", syscall(SYS_gettid), sched_getcpu());
+#endif
+    
+    while(1) {
+        dsyscall(SYS_gettid, 0);
+        local_times++;
+        pthread_testcancel();
+    }
+    pthread_cleanup_pop(clean_up_handler);
+}
+
 int main(int argc, char **argv)
 {
     ncpus = sysconf(_SC_NPROCESSORS_ONLN);
@@ -120,19 +146,19 @@ int main(int argc, char **argv)
     pthread_create(&serverid, &server_attr, server_routine, NULL);
 */    
     pthread_create(&serverid, NULL, server_routine, NULL);
-    for (int i = 0; i < ncpus - 1; ++i)
+    for (int i = 0; i < ncpus - 2; ++i)
         pthread_create(&threads[i], NULL, mmap_routine, NULL);
     
     alarm(DURATION);
 
-    for (int i = 0; i < ncpus - 1; ++i)
+    for (int i = 0; i < ncpus - 2; ++i)
         pthread_join(threads[i], &thread_ret[i]);
     
     pthread_cancel(serverid);
     pthread_join(serverid, &serverret);
 
     pthread_key_delete(tls_key);
-    printf("==> CPUs: %ld, Thoughput: %lu (ops per CPU)\n", ncpus, (thrput.times / DURATION / ncpus));
+    printf("==> CPUs: %ld, Thoughput: %lu (ops per CPU)\n", ncpus, (thrput.times / DURATION / (ncpus - 1)));
 
     return 0;
 }

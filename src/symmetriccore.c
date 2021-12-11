@@ -40,10 +40,23 @@ void *mmap_routine(void *args)
     }
 }
 
+void *gettid_routine(void *args)
+{
+    unsigned long local_time;
+    // long tid = syscall(SYS_gettid);
+    pthread_setspecific(tls_key, &local_time);
+
+    while(1) {
+        syscall(SYS_gettid);
+	local_time++;
+        // printf("[tid: %ld | Address: %p] Area mmaped\n", tid, addr);
+    }
+}
+
 // For the main thread
 void alrm_handler(int sig)
 {
-    for (int i = 0; i < ncpus; ++i)
+    for (int i = 0; i < ncpus - 1; ++i)
         pthread_kill(threads[i], SIGCHLD);
 }
 
@@ -72,16 +85,16 @@ int main(int argc, char **argv)
     sigaction(SIGCHLD, &chld, NULL);
 
     pthread_key_create(&tls_key, NULL);
-    for (int i = 0; i < ncpus; ++i)
+    for (int i = 0; i < ncpus - 1; ++i)
         pthread_create(&threads[i], NULL, mmap_routine, NULL);
     
     alarm(DURATION);
 
-    for (int i = 0; i < ncpus; ++i)
+    for (int i = 0; i < ncpus - 1; ++i)
         pthread_join(threads[i], &thread_ret[i]);
     
     pthread_key_delete(tls_key);
-    printf("==> CPUs: %d, Thoughput: %lu (ops per CPU)\n", ncpus, (thrput.times / DURATION / ncpus));
+    printf("==> CPUs: %d, Thoughput: %lu (ops per CPU)\n", ncpus, (thrput.times / DURATION / (ncpus - 1)));
 
     return 0;
 }
