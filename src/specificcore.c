@@ -14,20 +14,21 @@
 
 #include "ffwd.h"
 
-static long ncpus;
-
-#define MAXTHREADS 32
+#define MAXCLIENTS (MAXCPUS - 1)
 #define DURATION 10
 
-pthread_t threads[MAXTHREADS];
-void *thread_ret[MAXTHREADS];
-pthread_key_t tls_key;
-
-struct throughput {
+typedef void *(*routine_t)(void *);
+typedef struct throughput {
     unsigned long times;
     pthread_mutex_t lock;
-};
-struct throughput thrput = {
+} throughput_t;
+
+pthread_t client_ids[MAXCLIENTS];
+pthread_key_t tls_key;
+void *client_rets[MAXCLIENTS];
+
+static long ncpus;
+throughput_t thrput = {
     .times  = 0,
     .lock   = PTHREAD_MUTEX_INITIALIZER
 };
@@ -38,8 +39,9 @@ static void alrm_handler(int sig)
 #ifdef DEBUG
     printf("SIGALRM handler called from thread: %lu\n", syscall(SYS_gettid));
 #endif
-    for (int i = 0; i < ncpus - 2; ++i)
-        pthread_cancel(threads[i]);
+    int client_cnt;
+    for (client_cnt = 0; client_cnt < ncpus - 2; ++client_cnt)
+        pthread_cancel(client_ids[client_cnt]);
 }
 
 // For client thread
@@ -53,6 +55,45 @@ static void clean_up_handler(void)
     pthread_mutex_unlock(&thrput.lock);
 }
 
+void *mmap_routine(void *args);
+void *gettid_routine(void *args);
+
+routine_t client_routine = mmap_routine;
+
+int main(int argc, char **argv)
+{
+    ncpus = sysconf(_SC_NPROCESSORS_ONLN);
+    if((argc > 1) && (atoi(argv[1]) < ncpus))
+	    ncpus = atoi(argv[1]);
+ 
+    // Set the signal handler for SIGALRM
+    struct sigaction alrm;
+    alrm.sa_flags = 0;
+    alrm.sa_handler = alrm_handler;
+    sigaction(SIGALRM, &alrm, NULL);
+    pthread_key_create(&tls_key, NULL);
+
+    // Create a server core/thread
+    _ffwd_launch();
+
+    // Create several client threads
+    int client_cnt;
+    for (client_cnt = 0; client_cnt < ncpus - 2; ++client_cnt)
+        pthread_create(&client_ids[client_cnt], NULL, client_routine, NULL);
+    
+    alarm(DURATION);
+
+    for (client_cnt = 0; client_cnt < ncpus - 2; ++client_cnt)
+        pthread_join(client_ids[client_cnt], &client_rets[client_cnt]);
+    
+    _ffwd_shutdown();
+
+    pthread_key_delete(tls_key);
+    printf("==> CPUs: %ld, Thoughput: %lu (ops per CPU)\n", ncpus, (thrput.times / DURATION / (ncpus - 1)));
+
+    return 0;
+}
+
 void *mmap_routine(void *args)
 {
     unsigned long local_times;
@@ -63,21 +104,14 @@ void *mmap_routine(void *args)
     pthread_cleanup_push(clean_up_handler, NULL);
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &cancelstate);
     pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &canceltype);
-/*
-    int cpuid = sched_getcpu();
-    int threadid = syscall(SYS_gettid);
-    cpu_set_t cpumask;
-    CPU_ZERO(&cpumask);
-    CPU_SET(cpuid, &cpumask);
-    sched_setaffinity(threadid, sizeof(cpu_set_t), &cpumask);
-*/
+
 #ifdef DEBUG
     printf("Enter client thread: %lu, core: %d\n", syscall(SYS_gettid), sched_getcpu());
 #endif
     
     while(1) {
-        addr = (void *)dsyscall(SYS_mmap, 6, NULL, 4096, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
-        dsyscall(SYS_munmap, 2, addr, 4096);
+        addr = (void *)_ffwd_dsyscall(SYS_mmap, 6, NULL, 4096, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+        _ffwd_dsyscall(SYS_munmap, 2, addr, 4096);
         local_times++;
         pthread_testcancel();
     }
@@ -93,72 +127,15 @@ void *gettid_routine(void *args)
     pthread_cleanup_push(clean_up_handler, NULL);
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &cancelstate);
     pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &canceltype);
-/*
-    int cpuid = sched_getcpu();
-    int threadid = syscall(SYS_gettid);
-    cpu_set_t cpumask;
-    CPU_ZERO(&cpumask);
-    CPU_SET(cpuid, &cpumask);
-    sched_setaffinity(threadid, sizeof(cpu_set_t), &cpumask);
-*/
+
 #ifdef DEBUG
     printf("Enter client thread: %lu, core: %d\n", syscall(SYS_gettid), sched_getcpu());
 #endif
     
     while(1) {
-        dsyscall(SYS_gettid, 0);
+        _ffwd_dsyscall(SYS_gettid, 0);
         local_times++;
         pthread_testcancel();
     }
     pthread_cleanup_pop(clean_up_handler);
-}
-
-int main(int argc, char **argv)
-{
-    ncpus = sysconf(_SC_NPROCESSORS_ONLN);
-    if((argc > 1) && (atoi(argv[1]) < ncpus))
-	ncpus = atoi(argv[1]);
- 
-    // Set the signal handler for SIGALRM
-    struct sigaction alrm;
-    alrm.sa_flags = 0;
-    alrm.sa_handler = alrm_handler;
-    sigaction(SIGALRM, &alrm, NULL);
-    pthread_key_create(&tls_key, NULL);
-
-    pthread_t serverid;
-    void *serverret;
-
-#ifdef DEBUG
-    int cpuid = sched_getcpu();
-    long threadid = syscall(SYS_gettid);
-    printf("[coreID: %4d || threadID: %ld] ===> Main thread\n", cpuid, threadid);
-#endif
-/*
-    int server_cpuid = (sched_getcpu() + 1) % ncpus;
-    pthread_attr_t server_attr;
-    cpu_set_t server_mask;
-    CPU_ZERO(&server_mask);
-    CPU_SET((server_cpuid + 1) % ncpus, &server_mask);
-
-    const cpu_set_t server_cpus = server_mask;
-    pthread_attr_setaffinity_np(&server_attr, sizeof(cpu_set_t), &server_cpus);
-    pthread_create(&serverid, &server_attr, server_routine, NULL);
-*/    
-    pthread_create(&serverid, NULL, server_routine, NULL);
-    for (int i = 0; i < ncpus - 2; ++i)
-        pthread_create(&threads[i], NULL, mmap_routine, NULL);
-    
-    alarm(DURATION);
-
-    for (int i = 0; i < ncpus - 2; ++i)
-        pthread_join(threads[i], &thread_ret[i]);
-    
-    pthread_cancel(serverid);
-    pthread_join(serverid, &serverret);
-
-    pthread_key_delete(tls_key);
-    printf("==> CPUs: %ld, Thoughput: %lu (ops per CPU)\n", ncpus, (thrput.times / DURATION / (ncpus - 1)));
-
-    return 0;
 }

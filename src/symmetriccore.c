@@ -1,100 +1,135 @@
+#define _GNU_SOURCE
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
+
 #include <unistd.h>
 #include <time.h>
+#include <sched.h>
 #include <signal.h>
 #include <pthread.h>
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/syscall.h>
 
-#define MAXTHREADS 128
+#define MAXCPUS 32
+#define MAXCLIENTS (MAXCPUS - 1)
 #define DURATION 10
-static int ncpus;
 
-pthread_t threads[MAXTHREADS];
-void *thread_ret[MAXTHREADS];
-pthread_key_t tls_key;
-
-struct throughput {
+typedef void *(*routine_t)(void *);
+typedef struct throughput {
     unsigned long times;
     pthread_mutex_t lock;
-};
-struct throughput thrput = {
+} throughput_t;
+
+pthread_t client_ids[MAXCLIENTS];
+pthread_key_t tls_key;
+void *client_rets[MAXCLIENTS];
+
+static long ncpus;
+throughput_t thrput = {
     .times  = 0,
     .lock   = PTHREAD_MUTEX_INITIALIZER
 };
 
-void *mmap_routine(void *args)
-{
-    unsigned long local_time;
-    void *addr;
-    // long tid = syscall(SYS_gettid);
-    pthread_setspecific(tls_key, &local_time);
-
-    while(1) {
-        addr = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
-        munmap(addr, 4096);
-        local_time++;
-        // printf("[tid: %ld | Address: %p] Area mmaped\n", tid, addr);
-    }
-}
-
-void *gettid_routine(void *args)
-{
-    unsigned long local_time;
-    // long tid = syscall(SYS_gettid);
-    pthread_setspecific(tls_key, &local_time);
-
-    while(1) {
-        syscall(SYS_gettid);
-	local_time++;
-        // printf("[tid: %ld | Address: %p] Area mmaped\n", tid, addr);
-    }
-}
-
 // For the main thread
-void alrm_handler(int sig)
+static void alrm_handler(int sig)
 {
-    for (int i = 0; i < ncpus - 1; ++i)
-        pthread_kill(threads[i], SIGCHLD);
+#ifdef DEBUG
+    printf("SIGALRM handler called from thread: %lu\n", syscall(SYS_gettid));
+#endif
+    int client_cnt;
+    for (client_cnt = 0; client_cnt < ncpus - 1; ++client_cnt)
+        pthread_cancel(client_ids[client_cnt]);
 }
 
-// For other threads except main thread
-void chld_handler(int sig)
+// For client thread
+static void clean_up_handler(void)
 {
+#ifdef DEBUG
+    printf("Pthread clean_up handler called from thread: %lu\n", syscall(SYS_gettid));
+#endif
     pthread_mutex_lock(&thrput.lock);
     thrput.times += *(unsigned long *)pthread_getspecific(tls_key);
     pthread_mutex_unlock(&thrput.lock);
-    pthread_exit(0);
 }
+
+void *mmap_routine(void *args);
+void *gettid_routine(void *args);
+
+routine_t client_routine = mmap_routine;
 
 int main(int argc, char **argv)
 {
     ncpus = sysconf(_SC_NPROCESSORS_ONLN);
-    if ((argc > 1) && (atoi(argv[1]) < ncpus))
-	ncpus = atoi(argv[1]);
-
-    // Set the signal handler for SIGALRM && SIGCHLD
-    struct sigaction alrm, chld;
+    if((argc > 1) && (atoi(argv[1]) < ncpus))
+	    ncpus = atoi(argv[1]);
+ 
+    // Set the signal handler for SIGALRM
+    struct sigaction alrm;
     alrm.sa_flags = 0;
     alrm.sa_handler = alrm_handler;
     sigaction(SIGALRM, &alrm, NULL);
-    chld.sa_flags = 0;
-    chld.sa_handler = chld_handler;
-    sigaction(SIGCHLD, &chld, NULL);
-
     pthread_key_create(&tls_key, NULL);
-    for (int i = 0; i < ncpus - 1; ++i)
-        pthread_create(&threads[i], NULL, mmap_routine, NULL);
+
+    // Create several client threads
+    int client_cnt;
+    for (client_cnt = 0; client_cnt < ncpus - 1; ++client_cnt)
+        pthread_create(&client_ids[client_cnt], NULL, client_routine, NULL);
     
     alarm(DURATION);
 
-    for (int i = 0; i < ncpus - 1; ++i)
-        pthread_join(threads[i], &thread_ret[i]);
+    for (client_cnt = 0; client_cnt < ncpus - 1; ++client_cnt)
+        pthread_join(client_ids[client_cnt], &client_rets[client_cnt]);
     
     pthread_key_delete(tls_key);
-    printf("==> CPUs: %d, Thoughput: %lu (ops per CPU)\n", ncpus, (thrput.times / DURATION / (ncpus - 1)));
+    printf("==> CPUs: %ld, Thoughput: %lu (ops per CPU)\n", ncpus, (thrput.times / DURATION / (ncpus - 1)));
 
     return 0;
+}
+
+void *mmap_routine(void *args)
+{
+    unsigned long local_times;
+    void *addr;
+    int cancelstate, canceltype;
+    
+    pthread_setspecific(tls_key, &local_times);
+    pthread_cleanup_push(clean_up_handler, NULL);
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &cancelstate);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &canceltype);
+
+#ifdef DEBUG
+    printf("Enter client thread: %lu, core: %d\n", syscall(SYS_gettid), sched_getcpu());
+#endif
+    
+    while(1) {
+        addr = (void *)syscall(SYS_mmap, NULL, 4096, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+        syscall(SYS_munmap, addr, 4096);
+        local_times++;
+        pthread_testcancel();
+    }
+    pthread_cleanup_pop(clean_up_handler);
+}
+
+void *gettid_routine(void *args)
+{
+    unsigned long local_times;
+    int cancelstate, canceltype;
+    
+    pthread_setspecific(tls_key, &local_times);
+    pthread_cleanup_push(clean_up_handler, NULL);
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &cancelstate);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &canceltype);
+
+#ifdef DEBUG
+    printf("Enter client thread: %lu, core: %d\n", syscall(SYS_gettid), sched_getcpu());
+#endif
+    
+    while(1) {
+        syscall(SYS_gettid);
+        local_times++;
+        pthread_testcancel();
+    }
+    pthread_cleanup_pop(clean_up_handler);
 }

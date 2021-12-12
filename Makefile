@@ -9,7 +9,7 @@ DSTDIR	:= $(TOPDIR)/dst
 CFLAGS	:= -g -std=gnu99 -I$(INCDIR)
 LDFLAGS	:= -pthread -lgcc_s
 
-NTHREADS :=
+NCPUS :=
 
 all: $(DSTDIR)/symmetriccore $(DSTDIR)/specificcore $(DSTDIR)/singlecore
 
@@ -37,12 +37,12 @@ $(DSTDIR)/%.o: $(SRCDIR)/%.c
 .PHONY: symmetric specific single clean
 
 symmetric: $(DSTDIR)/symmetriccore
-	@$(DSTDIR)/symmetriccore $(NTHREADS)
+	@$(DSTDIR)/symmetriccore $(NCPUS)
 
 specific: $(DSTDIR)/specificcore
-	@$(DSTDIR)/specificcore $(NTHREADS)
+	@$(DSTDIR)/specificcore $(NCPUS)
 
-single: $(DSTDIR)/singlecore $(NTHREADS)
+single: $(DSTDIR)/singlecore $(NCPUS)
 	@$(DSTDIR)/singlecore
 
 clean:

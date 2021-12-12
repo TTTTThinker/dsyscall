@@ -8,7 +8,7 @@
 #define REQ_REVERSE(flags)      (flags ^= FL_REQ)
 
 #define FL_RESP(i)              (0x00000001 << i)
-#define RESP_REVERSE(flags, i)  (flags ^= (1 << i))
+#define RESP_REVERSE(flags, i)  (flags ^= (0x00000001 << i))
 #define RESP_GET(flags, i)      ((flags >> i) & 0x00000001)
 
 struct request {
@@ -23,10 +23,8 @@ struct response {
     long ret[MAXCPUS - 1];
 }__attribute__((aligned(2*CACHELINE)));
 
-struct request requests[MAXCPUS - 1];
-struct response responses;
-
-extern void *server_routine(void *args);
-extern long dsyscall(long syscallno, int argc, ...);
+extern int _ffwd_launch();
+extern void _ffwd_shutdown();
+extern long _ffwd_dsyscall(long syscallno, int argc, ...);
 
 #endif /* __FFWD_H */
