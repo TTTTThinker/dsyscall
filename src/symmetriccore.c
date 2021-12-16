@@ -39,7 +39,7 @@ static void alrm_handler(int sig)
     printf("SIGALRM handler called from thread: %lu\n", syscall(SYS_gettid));
 #endif
     int client_cnt;
-    for (client_cnt = 0; client_cnt < ncpus - 1; ++client_cnt)
+    for (client_cnt = 0; client_cnt < ncpus; ++client_cnt)
         pthread_cancel(client_ids[client_cnt]);
 }
 
@@ -74,16 +74,16 @@ int main(int argc, char **argv)
 
     // Create several client threads
     int client_cnt;
-    for (client_cnt = 0; client_cnt < ncpus - 1; ++client_cnt)
+    for (client_cnt = 0; client_cnt < ncpus; ++client_cnt)
         pthread_create(&client_ids[client_cnt], NULL, client_routine, NULL);
     
     alarm(DURATION);
 
-    for (client_cnt = 0; client_cnt < ncpus - 1; ++client_cnt)
+    for (client_cnt = 0; client_cnt < ncpus; ++client_cnt)
         pthread_join(client_ids[client_cnt], &client_rets[client_cnt]);
     
     pthread_key_delete(tls_key);
-    printf("==> CPUs: %ld, Thoughput: %lu (ops per CPU)\n", ncpus, (thrput.times / DURATION / (ncpus - 1)));
+    printf("==> CPUs: %ld, Thoughput: %lu (ops per CPU)\n", ncpus, (thrput.times / DURATION / ncpus));
 
     return 0;
 }

@@ -16,6 +16,7 @@ struct request _ffwd_requests[MAXCPUS - 1];
 struct response _ffwd_responses;
 bool _ffwd_running = false;
 pthread_t _ffwd_serverid;
+int _ffwd_servercore = -1;
 
 static void clean_up_handler(void)
 {
@@ -37,6 +38,7 @@ static void *_ffwd_server_routine(void *args)
     sched_setaffinity(threadid, sizeof(cpu_set_t), &cpumask);
 
     printf("[coreID: %4d || threadID: %ld] ===> Server routine start serving ...\n", cpuid, threadid);
+    _ffwd_servercore = cpuid;
 
     int cancelstate, canceltype;
     pthread_cleanup_push(clean_up_handler, NULL);
@@ -94,10 +96,14 @@ static void *_ffwd_server_routine(void *args)
 
 int _ffwd_launch()
 {
-    int ret = 0;
+    int ret = -1;
     if (_ffwd_running == false) {
         ret = pthread_create(&_ffwd_serverid, NULL, _ffwd_server_routine, NULL);
         _ffwd_running = (ret < 0) ? false : true;
+        if (ret == 0) {
+            while (_ffwd_servercore == -1);
+            ret = _ffwd_servercore;
+        }
     }
     return ret;
 }
@@ -109,6 +115,7 @@ void _ffwd_shutdown()
         pthread_cancel(_ffwd_serverid);
         pthread_join(_ffwd_serverid, &ret);
         _ffwd_running = false;
+        _ffwd_servercore = -1;
     }
 }
 

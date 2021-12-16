@@ -8,8 +8,8 @@ In this project, we compare the throughput of syscalls in three conditions:
 
 For specificcore, we use a message passing way like ffwd[SOSP'17] to reduce the cache coherence traffic.
 
-To run this project, you can:
-> make
-> make single/symmetric/specific [NCPUS=]
+To run this project, you can:  
+> make  
+> make single/symmetric/specific [NCPUS=]  
 
 NOTE: It can only support systems have no more than 32 logical CPUS!

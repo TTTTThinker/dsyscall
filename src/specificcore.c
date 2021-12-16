@@ -74,12 +74,25 @@ int main(int argc, char **argv)
     pthread_key_create(&tls_key, NULL);
 
     // Create a server core/thread
-    _ffwd_launch();
+    int server_cpu = _ffwd_launch();
+
+    // Set client CPU mask to avoid running on the same core with _ffwd_server
+    long online_cpus = sysconf(_SC_NPROCESSORS_ONLN);
+    cpu_set_t cpumask;
+    int processor_id;
+    pthread_attr_t client_attr;
+
+    CPU_ZERO(&cpumask);
+    for (processor_id = 0; processor_id < online_cpus; ++processor_id)
+        CPU_SET(processor_id, &cpumask);
+    CPU_CLR(server_cpu, &cpumask);
+    CPU_CLR((server_cpu + 10) % 20, &cpumask);
+    pthread_attr_setaffinity_np(&client_attr, sizeof(cpumask), &cpumask);
 
     // Create several client threads
     int client_cnt;
     for (client_cnt = 0; client_cnt < ncpus - 2; ++client_cnt)
-        pthread_create(&client_ids[client_cnt], NULL, client_routine, NULL);
+        pthread_create(&client_ids[client_cnt], &client_attr, client_routine, NULL);
     
     alarm(DURATION);
 
@@ -89,7 +102,7 @@ int main(int argc, char **argv)
     _ffwd_shutdown();
 
     pthread_key_delete(tls_key);
-    printf("==> CPUs: %ld, Thoughput: %lu (ops per CPU)\n", ncpus, (thrput.times / DURATION / (ncpus - 1)));
+    printf("==> CPUs: %ld, Thoughput: %lu (ops per CPU)\n\n", ncpus, (thrput.times / DURATION / ncpus));
 
     return 0;
 }
