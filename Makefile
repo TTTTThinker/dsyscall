@@ -11,6 +11,9 @@ LDFLAGS	:= -pthread -lgcc_s
 
 NCPUS :=
 
+docker: $(TOPDIR)/docker.sh
+	@$(TOPDIR)/docker.sh
+
 all: $(DSTDIR)/symmetriccore $(DSTDIR)/specificcore $(DSTDIR)/singlecore
 
 $(DSTDIR)/symmetriccore: $(DSTDIR)/symmetriccore.o
