@@ -10,11 +10,12 @@
 #include <pthread.h>
 #include <sys/mman.h>
 #include <sys/types.h>
+#include <sys/epoll.h>
 #include <sys/syscall.h>
 
 #define MAXCPUS 32
 #define MAXCLIENTS (MAXCPUS - 1)
-#define DURATION 10
+#define DURATION 1
 
 typedef void *(*routine_t)(void *);
 typedef struct throughput {
@@ -56,6 +57,7 @@ static void clean_up_handler(void)
 
 void *mmap_routine(void *args);
 void *gettid_routine(void *args);
+void *epoll_wait_routine(void *args);
 
 routine_t client_routine = mmap_routine;
 
@@ -131,5 +133,43 @@ void *gettid_routine(void *args)
         local_times++;
         pthread_testcancel();
     }
+    pthread_cleanup_pop(clean_up_handler);
+}
+
+static void epoll_cleanup_handler(void *epfd)
+{
+    int epollfd = *(int *)epfd;
+    close(epollfd);
+}
+
+void *epoll_wait_routine(void *args)
+{
+    unsigned long local_times;
+    int cancelstate, canceltype;
+    int epollfd, MAXEVENTS = 1;
+    struct epoll_event ev, event;
+    
+    pthread_setspecific(tls_key, &local_times);
+    pthread_cleanup_push(clean_up_handler, NULL);
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &cancelstate);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &canceltype);
+
+#ifdef DEBUG
+    printf("Enter client thread: %lu, core: %d\n", syscall(SYS_gettid), sched_getcpu());
+#endif
+
+    ev.data.fd = 0;
+    ev.events = EPOLLIN;
+    epollfd = epoll_create(1);
+    epoll_ctl(epollfd, EPOLL_CTL_ADD, 0, &ev);
+    pthread_cleanup_push(epoll_cleanup_handler, &epollfd);
+
+    while(1) {
+        syscall(SYS_epoll_wait, epollfd, &event, MAXEVENTS, 0);
+        local_times++;
+        pthread_testcancel();
+    }
+
+    pthread_cleanup_pop(epoll_cleanup_handler);
     pthread_cleanup_pop(clean_up_handler);
 }
