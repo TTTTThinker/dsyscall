@@ -10,6 +10,7 @@ For specificcore, we use a message passing way like ffwd[SOSP'17] to reduce the 
   
 To build this project, you can:  
 > make (or, make docker)  
+
 To run this project, you can:  
 > make single/symmetric/specific [NCPUS=]  
 
