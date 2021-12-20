@@ -12,17 +12,25 @@
 
 #include "ffwd.h"
 
+/* For global communication between server and clients */
 struct request _ffwd_requests[MAXCPUS - 1];
 struct response _ffwd_responses;
+
+/* For ffwd server state */
 bool _ffwd_running = false;
 pthread_t _ffwd_serverid;
 int _ffwd_servercore = -1;
+
+/* For ffwd server statistic */
+unsigned long _ffwd_polling_round;
+unsigned long _ffwd_effective_round;
 
 static void clean_up_handler(void)
 {
     int cpuid = sched_getcpu();
     long threadid = syscall(SYS_gettid);
     printf("[coreID: %4d || threadID: %ld] ===> Server routine exiting ...\n", cpuid, threadid);
+    printf("[FFWD_POLLING_ROUND: %lu || FFWD_EFFECTIVE_ROUND: %lu]\n", _ffwd_polling_round, _ffwd_effective_round);
 }
 
 static void *_ffwd_server_routine(void *args)
@@ -84,9 +92,11 @@ static void *_ffwd_server_routine(void *args)
         if (has_requests) {
             // Now, it's just at this moment the syscall responses are sent to the clients
             _ffwd_responses = re;
+            _ffwd_effective_round++;
 
             has_requests = false;
         }
+        _ffwd_polling_round++;
 #ifdef DEBUG
     printf("[coreID: %4d || threadID: %ld] ===> A round finished.\n", cpuid, threadid);
 #endif
@@ -114,8 +124,11 @@ void _ffwd_shutdown()
     if (_ffwd_running == true) {
         pthread_cancel(_ffwd_serverid);
         pthread_join(_ffwd_serverid, &ret);
+
         _ffwd_running = false;
         _ffwd_servercore = -1;
+        _ffwd_polling_round = 0;
+        _ffwd_effective_round = 0;
     }
 }
 
