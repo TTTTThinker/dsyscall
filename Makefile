@@ -11,8 +11,7 @@ LDFLAGS	:= -pthread -lgcc_s
 
 NCPUS :=
 
-docker: $(TOPDIR)/docker.sh
-	@$(TOPDIR)/docker.sh
+.DEFAULT_GOAL: all
 
 all: $(DSTDIR)/symmetriccore $(DSTDIR)/specificcore $(DSTDIR)/singlecore
 
@@ -36,7 +35,9 @@ $(DSTDIR)/%.o: $(SRCDIR)/%.c
 	@mkdir -p $(@D)
 	$(CC) -o $@ -c $(CFLAGS) $<
 
-.DEFAULT_GOAL: all
+docker: $(TOPDIR)/docker.sh
+	@$(TOPDIR)/docker.sh
+
 .PHONY: symmetric specific single clean
 
 symmetric: $(DSTDIR)/symmetriccore
